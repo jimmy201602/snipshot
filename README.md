@@ -40,7 +40,7 @@ snipshot install       # 注册快捷键（daemon 模式下同时注册开机自
 
 | 命令 | 说明 |
 |---|---|
-| `snipshot` | **打开应用**（托盘常驻）；已在运行时=再截一张 |
+| `snipshot` | **打开应用**（托盘常驻）；已在运行时=打开设置窗口 |
 | `snipshot trigger` | 快捷键绑定项：仅应用运行时触发（可在设置里改兜底） |
 | `snipshot settings` | 打开设置窗口 |
 | `snipshot wincheck` | 列出窗口吸附检测到的应用窗口（排障用） |

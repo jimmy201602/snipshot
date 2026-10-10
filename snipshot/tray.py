@@ -4,7 +4,7 @@ On GNOME this needs an AppIndicator/KStatusNotifier extension to be
 visible (KDE shows it natively); if the tray is unavailable the daemon
 still works, and settings can be opened via `snipshot settings`.
 """
-from PyQt6.QtCore import QObject
+from PyQt6.QtCore import QObject, Qt
 from PyQt6.QtWidgets import QApplication, QMenu, QSystemTrayIcon
 
 from . import config, install
@@ -17,6 +17,7 @@ class TrayApp(QObject):
         super().__init__()
         self.daemon = daemon
         self.tray: QSystemTrayIcon | None = None
+        self._dlg: SettingsDialog | None = None
 
         if not QSystemTrayIcon.isSystemTrayAvailable():
             print("系统托盘不可用（GNOME 需要 AppIndicator 扩展）;"
@@ -52,8 +53,17 @@ class TrayApp(QObject):
             self.open_settings()
 
     def open_settings(self) -> None:
-        dlg = SettingsDialog()
-        dlg.exec()
+        if self._dlg is not None and self._dlg.isVisible():
+            self._dlg.raise_()
+            self._dlg.activateWindow()
+            return
+        # WindowStaysOnTopHint: on Wayland a background daemon can't
+        # raise its own window — without this the dialog opens *behind*
+        # the focused window and the icon click looks like a no-op
+        self._dlg = SettingsDialog()
+        self._dlg.setWindowFlag(Qt.WindowType.WindowStaysOnTopHint)
+        self._dlg.exec()
+        self._dlg = None
         self.act_auto.setChecked(bool(config.load().get("autostart")))
 
     def _toggle_autostart(self, on: bool) -> None:

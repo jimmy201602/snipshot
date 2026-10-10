@@ -1,7 +1,7 @@
 """snipshot command line interface.
 
   snipshot            open the app (tray daemon); if already running,
-                      takes a screenshot instead
+                      opens the settings window instead
   snipshot trigger    hotkey target: trigger daemon, or shoot oneshot if
                       "oneshot_fallback" is enabled; silent no-op otherwise
   snipshot shoot      capture + overlay in this process (oneshot)
@@ -78,9 +78,9 @@ def main(argv: list[str] | None = None) -> int:
         return _shoot()
 
     if cmd == "daemon":
-        from .ipc import send_trigger
-        if send_trigger():
-            print("snipshot 已在运行")
+        from .ipc import query
+        if query("STATUS") is not None:
+            print("snipshot daemon 已在运行")
             return 0
         from .daemon import run_daemon
         return run_daemon()
@@ -97,10 +97,11 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     if cmd == "open":
-        # launched from menu/desktop: trigger if already up, else start
-        # the tray app
-        from .ipc import send_trigger
-        if send_trigger():
+        # launched from menu/desktop: if the app is already running the
+        # user meant "open the app", not "take a screenshot" — surface
+        # the settings window; otherwise start the tray daemon
+        from .ipc import query
+        if query("SETTINGS") is not None:
             return 0
         from .daemon import run_daemon
         return run_daemon()

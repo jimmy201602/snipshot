@@ -67,6 +67,12 @@ def run_daemon() -> int:
     app = QApplication([])
     app.setApplicationName("snipshot")
     app.setQuitOnLastWindowClosed(False)
+    # a live daemon may be momentarily unreachable while its GUI thread is
+    # blocked (e.g. mid-capture) — probe with a generous timeout BEFORE
+    # touching the socket, or we'd steal it from a running instance
+    if ipc.query("STATUS", timeout=3.0) is not None:
+        print("snipshot daemon 已在运行")
+        return 0
     daemon = Daemon(app)
     if not daemon.server.isListening():
         print("snipshot daemon 已在运行")

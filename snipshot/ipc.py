@@ -16,7 +16,7 @@ def socket_path() -> Path:
     return Path(base) / "snipshot.sock"
 
 
-def send_trigger(timeout: float = 1.5) -> bool:
+def send_trigger(timeout: float = 2.0) -> bool:
     """Ping a running daemon. Returns True if it acknowledged."""
     path = socket_path()
     if not path.exists():
@@ -33,8 +33,13 @@ def send_trigger(timeout: float = 1.5) -> bool:
         return False
 
 
-def query(msg: str, timeout: float = 0.5) -> str | None:
-    """Send a raw line to the daemon, return its reply (or None)."""
+def query(msg: str, timeout: float = 2.0) -> str | None:
+    """Send a raw line to the daemon, return its reply (or None).
+
+    The timeout must outlast the daemon's event-loop stalls — e.g. a
+    ~0.5s gnome-screenshot subprocess runs inside it — otherwise a
+    caller could conclude "no daemon" and spawn a duplicate.
+    """
     try:
         s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
         s.settimeout(timeout)
