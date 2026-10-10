@@ -11,10 +11,10 @@ DEFAULTS = {
     "hotkey": "<Ctrl><Alt>a",
     # Where "save" puts screenshots by default
     "save_dir": str(Path.home() / "Pictures"),
-    # "daemon":  resident process shows the overlay instantly (WeChat-like,
-    #            verified to receive keyboard focus on GNOME Wayland)
-    # "oneshot": every hotkey press runs capture+overlay in a fresh process
-    "mode": "daemon",
+    # resident tray app must be running for the hotkey to work (unless
+    # oneshot_fallback is on); NOT started at login unless autostart
+    "autostart": False,
+    "oneshot_fallback": False,
     # milliseconds between trigger and capture (lets transient UI settle)
     "capture_delay_ms": 40,
     # remembered across sessions (WeChat/QQ do this too)

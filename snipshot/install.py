@@ -83,7 +83,7 @@ def install_hotkey() -> bool:
     subprocess.run([*base, f"{BIND_SCHEMA}:{BIND_PATH}",
                     "name", "Snipshot 截图"], check=True)
     subprocess.run([*base, f"{BIND_SCHEMA}:{BIND_PATH}",
-                    "command", f"'{cmd}'"], check=True)
+                    "command", f"'{cmd} trigger'"], check=True)
     subprocess.run([*base, f"{BIND_SCHEMA}:{BIND_PATH}",
                     "binding", f"'{cfg['hotkey']}'"], check=True)
     return True
@@ -125,7 +125,7 @@ def install_desktop_entry() -> None:
         "Type=Application\n"
         "Name=Snipshot 截图\n"
         "Comment=仿微信/QQ 的截图工具 (Ctrl+Alt+A)\n"
-        f"Exec={keybind_command()} shoot\n"
+        f"Exec={keybind_command()}\n"
         "Icon=applets-screenshooter\n"
         "Categories=Utility;\n")
 
@@ -146,9 +146,11 @@ def install() -> str:
                     "请手动在系统设置中添加快捷键，命令: "
                     f"{keybind_command()}")
     install_desktop_entry()
-    if cfg.get("mode") == "daemon":
+    if cfg.get("autostart"):
         install_autostart()
-        msgs.append("已启用开机自启 (daemon 模式)")
+        msgs.append("已启用开机自启")
+    else:
+        remove_autostart()   # clean up a stale entry from older installs
     return "\n".join(msgs)
 
 

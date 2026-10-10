@@ -1,10 +1,14 @@
 """snipshot command line interface.
 
-  snipshot            trigger daemon if running, else capture+overlay now
+  snipshot            open the app (tray daemon); if already running,
+                      takes a screenshot instead
+  snipshot trigger    hotkey target: trigger daemon, or shoot oneshot if
+                      "oneshot_fallback" is enabled; silent no-op otherwise
   snipshot shoot      capture + overlay in this process (oneshot)
-  snipshot daemon     resident mode; listens for TRIGGER on local socket
-  snipshot install    register hotkey (and autostart in daemon mode)
-  snipshot uninstall  remove hotkey + autostart
+  snipshot settings   open the settings dialog
+  snipshot daemon     resident tray app; listens for TRIGGER on local socket
+  snipshot install    register hotkey (and autostart if enabled)
+  snipshot uninstall  remove hotkey + autostart + menu entry
 """
 import sys
 
@@ -24,9 +28,16 @@ def _app():
     return app
 
 
+def _shoot() -> int:
+    app = _app()
+    from .app import run_shot
+    run_shot(app, quit_on_done=True)
+    return app.exec()
+
+
 def main(argv: list[str] | None = None) -> int:
     argv = list(sys.argv[1:] if argv is None else argv)
-    cmd = argv[0] if argv else "trigger"
+    cmd = argv[0] if argv else "open"
 
     if cmd in ("-h", "--help", "help"):
         _usage()
@@ -44,29 +55,46 @@ def main(argv: list[str] | None = None) -> int:
         print(uninstall())
         return 0
 
+    if cmd == "settings":
+        app = _app()
+        from .settings import SettingsDialog
+        SettingsDialog().exec()
+        return 0
+
+    if cmd == "shoot":
+        return _shoot()
+
     if cmd == "daemon":
+        from .ipc import send_trigger
+        if send_trigger():
+            print("snipshot 已在运行")
+            return 0
         from .daemon import run_daemon
         return run_daemon()
 
-    if cmd == "shoot":
-        app = _app()
-        from .app import run_shot
-        run_shot(app, quit_on_done=True)
-        return app.exec()
-
-    if cmd != "trigger":
-        print(f"未知命令: {cmd}", file=sys.stderr)
-        _usage()
-        return 2
-
-    # default: try daemon, fall back to oneshot
-    from .ipc import send_trigger
-    if send_trigger():
+    if cmd == "trigger":
+        # hotkey entry: only while the app is running, unless the user
+        # opted into the oneshot fallback in settings
+        from .ipc import send_trigger
+        if send_trigger():
+            return 0
+        from . import config
+        if config.load().get("oneshot_fallback"):
+            return _shoot()
         return 0
-    app = _app()
-    from .app import run_shot
-    run_shot(app, quit_on_done=True)
-    return app.exec()
+
+    if cmd == "open":
+        # launched from menu/desktop: trigger if already up, else start
+        # the tray app
+        from .ipc import send_trigger
+        if send_trigger():
+            return 0
+        from .daemon import run_daemon
+        return run_daemon()
+
+    print(f"未知命令: {cmd}", file=sys.stderr)
+    _usage()
+    return 2
 
 
 if __name__ == "__main__":

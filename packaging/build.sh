@@ -13,6 +13,9 @@ python3 -m PyInstaller \
     --hidden-import snipshot.daemon \
     --hidden-import snipshot.install \
     --hidden-import snipshot.pin \
+    --hidden-import snipshot.settings \
+    --hidden-import snipshot.tray \
+    --hidden-import snipshot.trayicon \
     packaging/entry.py
 
 echo

@@ -1,5 +1,4 @@
-"""Resident daemon: stays running, listens for TRIGGER on a local socket,
-and shows the capture overlay when triggered."""
+"""Resident app: tray icon + local socket listener for TRIGGER."""
 from PyQt6.QtCore import QObject
 from PyQt6.QtNetwork import QLocalServer, QLocalSocket
 from PyQt6.QtWidgets import QApplication
@@ -13,11 +12,22 @@ class Daemon(QObject):
         super().__init__()
         self.app = app
         self.busy = False
+        self._tray = None
         self.server = QLocalServer(self)
         path = str(ipc.socket_path())
         QLocalServer.removeServer(path)
         self.server.listen(path)
         self.server.newConnection.connect(self._on_conn)
+
+    def trigger(self) -> None:
+        """Start a capture+overlay session (socket or tray entry point)."""
+        if not self.busy:
+            self.busy = True
+            run_shot(self.app, quit_on_done=False,
+                     on_session=lambda s: s.finished.connect(self._idle))
+
+    def _idle(self) -> None:
+        self.busy = False
 
     def _on_conn(self) -> None:
         while self.server.hasPendingConnections():
@@ -32,17 +42,25 @@ class Daemon(QObject):
             from PyQt6.QtGui import QGuiApplication
             fw = QGuiApplication.focusWindow()
             sock.write(b"FOCUSED\n" if fw is not None else b"NONE\n")
+        elif data == "SETTINGS":
+            sock.write(b"OK\n")
+            sock.flush()
+            sock.disconnectFromServer()
+            self._open_settings()
+            return
         else:
             sock.write(b"OK\n")
         sock.flush()
         sock.disconnectFromServer()
-        if data == "TRIGGER" and not self.busy:
-            self.busy = True
-            run_shot(self.app, quit_on_done=False,
-                     on_session=lambda s: s.finished.connect(self._idle))
+        if data == "TRIGGER":
+            self.trigger()
 
-    def _idle(self) -> None:
-        self.busy = False
+    def _open_settings(self) -> None:
+        if self._tray is not None:
+            self._tray.open_settings()
+        else:
+            from .settings import SettingsDialog
+            SettingsDialog().exec()
 
 
 def run_daemon() -> int:
@@ -51,5 +69,8 @@ def run_daemon() -> int:
     app.setQuitOnLastWindowClosed(False)
     daemon = Daemon(app)
     if not daemon.server.isListening():
+        print("snipshot daemon 已在运行")
         return 1
+    from .tray import TrayApp
+    daemon._tray = TrayApp(app, daemon)
     return app.exec()

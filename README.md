@@ -16,7 +16,7 @@
 
 ```bash
 bash packaging/build.sh     # 产出 dist/snipshot (~73MB, 自带 Python+Qt6)
-bash packaging/install.sh   # 装到 ~/.local/bin 并注册 Ctrl+Alt+A + 自启
+bash packaging/install.sh   # 装到 ~/.local/bin 并注册 Ctrl+Alt+A + 菜单项
 ```
 
 `dist/snipshot` 拷到任何同架构 Linux 机器即可用；运行时只需系统提供
@@ -38,11 +38,26 @@ snipshot install       # 注册快捷键（daemon 模式下同时注册开机自
 
 | 命令 | 说明 |
 |---|---|
-| `snipshot` | 有守护进程则触发，否则即时截图（快捷键执行的就是它） |
+| `snipshot` | **打开应用**（托盘常驻）；已在运行时=再截一张 |
+| `snipshot trigger` | 快捷键绑定项：仅应用运行时触发（可在设置里改兜底） |
+| `snipshot settings` | 打开设置窗口 |
 | `snipshot shoot` | 强制单次截图（调试/无守护时） |
-| `snipshot daemon` | 常驻模式，监听 socket 触发 |
-| `snipshot install` | 注册快捷键 + （daemon 模式）自启 |
-| `snipshot uninstall` | 移除快捷键与自启 |
+| `snipshot daemon` | 常驻托盘应用，监听 socket 触发 |
+| `snipshot install` | 注册快捷键 + 菜单项 |
+| `snipshot uninstall` | 移除快捷键/自启/菜单项 |
+
+### 托盘模式（默认）
+
+- 启动后图标驻留顶栏（GNOME 需 AppIndicator 扩展；KDE 原生支持）
+- 左键点开设置；右键菜单：截图 / 设置 / 开机自启 / 退出
+- **只有应用运行时快捷键才生效**（与微信/QQ一致）；设置里可开
+  "软件未运行时快捷键也可直接截图"
+- 默认**不**开机自启；托盘菜单或设置里勾选即可开启
+
+### 设置项（托盘 → 设置）
+
+快捷键预设（Ctrl+Alt+A / Alt+A / 自定义）、保存目录、触发延迟、
+未运行兜底、开机自启——保存后即时生效（快捷键当场重绑）。
 
 ## 操作
 

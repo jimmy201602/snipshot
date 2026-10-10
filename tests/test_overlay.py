@@ -213,3 +213,23 @@ def test_color_size_persist(qapp):
     sess2 = Session(img2, app_quit_on_done=False)
     assert sess2.color_hex == "#e9262c"
     assert sess2.size_name == "L"
+
+
+def test_settings_dialog_roundtrip(qapp, monkeypatch):
+    from snipshot import config, install
+    from snipshot.settings import SettingsDialog
+    # stub out real gsettings/autostart side effects
+    monkeypatch.setattr(install, "install_hotkey", lambda: True)
+    monkeypatch.setattr(install, "install_autostart", lambda: None)
+    monkeypatch.setattr(install, "remove_autostart", lambda: None)
+    dlg = SettingsDialog()
+    dlg.hk_combo.setCurrentIndex(1)           # Alt+A preset
+    dlg.dir_edit.setText("/tmp/shots")
+    dlg.autostart_chk.setChecked(False)
+    dlg.oneshot_chk.setChecked(True)
+    dlg.accept()
+    cfg = config.load()
+    assert cfg["hotkey"] == "<Alt>a"
+    assert cfg["save_dir"] == "/tmp/shots"
+    assert cfg["oneshot_fallback"] is True
+    assert cfg["autostart"] is False
