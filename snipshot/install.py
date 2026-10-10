@@ -33,20 +33,27 @@ def launcher_path() -> Path:
     return bindir / "snipshot"
 
 
-def write_launcher() -> Path:
-    """Create ~/.local/bin/snipshot pointing at this installation."""
-    path = launcher_path()
+def keybind_command() -> str:
+    """The command line the desktop hotkey should invoke.
+
+    Priority:
+      1. PyInstaller binary (we ARE the frozen executable)
+      2. a `snipshot` already on PATH (pip install / packaged binary)
+      3. source checkout -> write a wrapper into ~/.local/bin
+    """
+    if getattr(sys, "frozen", False):
+        return sys.executable
     exe = shutil.which("snipshot")
-    if exe and Path(exe).resolve() != path:
-        # installed via pip already
-        path.write_text(f'#!/bin/sh\nexec "{exe}" "$@"\n')
-    else:
+    if exe:
+        return exe
+    path = launcher_path()
+    if not (path.exists() and "snipshot" in path.read_text(errors="replace")):
         repo = Path(__file__).resolve().parent.parent
         path.write_text(
             "#!/bin/sh\n"
             f'PYTHONPATH="{repo}" exec "{sys.executable}" -m snipshot "$@"\n')
-    path.chmod(0o755)
-    return path
+        path.chmod(0o755)
+    return str(path)
 
 
 def _current_bindings() -> list[str]:
@@ -66,7 +73,7 @@ def install_hotkey() -> bool:
     if not shutil.which("gsettings"):
         return False
     cfg = config.load()
-    cmd = str(write_launcher())
+    cmd = keybind_command()
     paths = _current_bindings()
     if BIND_PATH not in paths:
         paths.append(BIND_PATH)
@@ -92,19 +99,39 @@ def remove_hotkey() -> None:
                    capture_output=True)
 
 
+DESKTOP_FILE = (Path.home() / ".local" / "share" / "applications"
+                / "snipshot.desktop")
+
+
 def install_autostart() -> None:
     AUTOSTART.parent.mkdir(parents=True, exist_ok=True)
     AUTOSTART.write_text(
         "[Desktop Entry]\n"
         "Type=Application\n"
         "Name=Snipshot Daemon\n"
-        f"Exec={launcher_path()} daemon\n"
+        f"Exec={keybind_command()} daemon\n"
         "X-GNOME-Autostart-enabled=true\n"
         "NoDisplay=true\n")
 
 
 def remove_autostart() -> None:
     AUTOSTART.unlink(missing_ok=True)
+
+
+def install_desktop_entry() -> None:
+    DESKTOP_FILE.parent.mkdir(parents=True, exist_ok=True)
+    DESKTOP_FILE.write_text(
+        "[Desktop Entry]\n"
+        "Type=Application\n"
+        "Name=Snipshot 截图\n"
+        "Comment=仿微信/QQ 的截图工具 (Ctrl+Alt+A)\n"
+        f"Exec={keybind_command()} shoot\n"
+        "Icon=applets-screenshooter\n"
+        "Categories=Utility;\n")
+
+
+def remove_desktop_entry() -> None:
+    DESKTOP_FILE.unlink(missing_ok=True)
 
 
 def install() -> str:
@@ -117,7 +144,8 @@ def install() -> str:
     else:
         msgs.append("无法自动注册快捷键 (非 GNOME 或无 gsettings)。\n"
                     "请手动在系统设置中添加快捷键，命令: "
-                    f"{write_launcher()}")
+                    f"{keybind_command()}")
+    install_desktop_entry()
     if cfg.get("mode") == "daemon":
         install_autostart()
         msgs.append("已启用开机自启 (daemon 模式)")
@@ -127,4 +155,5 @@ def install() -> str:
 def uninstall() -> str:
     remove_hotkey()
     remove_autostart()
-    return "已移除快捷键与自启动项"
+    remove_desktop_entry()
+    return "已移除快捷键、自启动项与应用菜单项"

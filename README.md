@@ -12,6 +12,18 @@
 
 ## 安装
 
+### 方式一：单文件二进制（推荐分发）
+
+```bash
+bash packaging/build.sh     # 产出 dist/snipshot (~73MB, 自带 Python+Qt6)
+bash packaging/install.sh   # 装到 ~/.local/bin 并注册 Ctrl+Alt+A + 自启
+```
+
+`dist/snipshot` 拷到任何同架构 Linux 机器即可用；运行时只需系统提供
+截图后端（GNOME 自带 `gnome-screenshot`）与可选的 `wl-copy`（剪贴板持久化）。
+
+### 方式二：pip / 源码
+
 ```bash
 pip install .          # 或直接用仓库源码
 snipshot install       # 注册快捷键（daemon 模式下同时注册开机自启）
