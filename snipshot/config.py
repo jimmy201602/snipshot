@@ -17,6 +17,9 @@ DEFAULTS = {
     "mode": "daemon",
     # milliseconds between trigger and capture (lets transient UI settle)
     "capture_delay_ms": 40,
+    # remembered across sessions (WeChat/QQ do this too)
+    "last_color": "#00a2ff",
+    "last_size": "M",
 }
 
 

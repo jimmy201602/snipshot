@@ -95,6 +95,7 @@ class Overlay(QWidget):
         self.toolbar.hide()
         self.palette = PaletteBar(self)
         self.palette.ensurePolished()
+        self.palette.set_current(session.color_hex, session.size_name)
         self.palette.hide()
 
         self.toolbar.set_undo_enabled(False)
@@ -169,10 +170,10 @@ class Overlay(QWidget):
         self._relayout()
 
     def _on_color(self, c: QColor) -> None:
-        self.session.color_hex = c.name()
+        self.session.set_color(c.name())
 
     def _on_size(self, name: str) -> None:
-        self.session.size_name = name
+        self.session.set_size(name)
 
     def _on_annots(self) -> None:
         self.toolbar.set_undo_enabled(bool(self.session.stack.shapes))

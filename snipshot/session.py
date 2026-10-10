@@ -36,8 +36,9 @@ class Session(QObject):
         self.stack = ShapeStack()
         self.sel: QRectF | None = None          # in image px
         self.tool: str = TOOL_NONE
-        self.color_hex: str = PALETTE[4]
-        self.size_name: str = "M"
+        cfg = config.load()
+        self.color_hex: str = cfg.get("last_color", PALETTE[4])
+        self.size_name: str = cfg.get("last_size", "M")
         self.overlays: list = []
         self.pinned: list = []                  # keep PinWindows alive
         self.clipboard_persistent = True
@@ -61,6 +62,20 @@ class Session(QObject):
         if t == TOOL_MOSAIC:
             self.start_mosaic_worker()  # background; shape appears on ready
         self.toolChanged.emit()
+
+    def set_color(self, hexv: str) -> None:
+        self.color_hex = hexv
+        self._persist("last_color", hexv)
+
+    def set_size(self, name: str) -> None:
+        self.size_name = name
+        self._persist("last_size", name)
+
+    @staticmethod
+    def _persist(key: str, value) -> None:
+        cfg = config.load()
+        cfg[key] = value
+        config.save(cfg)
 
     # ---- mosaic (lazy, computed off the UI thread) ----------------------
     def start_mosaic_worker(self) -> None:
@@ -167,6 +182,7 @@ class Session(QObject):
             parent, "保存截图", start, "PNG 图片 (*.png);;JPEG 图片 (*.jpg)")
         if path:
             crop.save(path)
+            self._persist("save_dir", str(Path(path).parent))
             self._finish()
 
     def pin(self) -> None:

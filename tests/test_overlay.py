@@ -197,3 +197,19 @@ def test_undo_shortcut(qapp):
     assert len(sess.stack.shapes) == 1
     QTest.keyClick(ov, Qt.Key.Key_Z, Qt.KeyboardModifier.ControlModifier)
     assert len(sess.stack.shapes) == 0
+
+
+# ------------------------------------------------------------ prefs -----
+def test_color_size_persist(qapp):
+    from snipshot import config
+    sess, ov = _make()
+    sess.set_color("#e9262c")
+    sess.set_size("L")
+    cfg = config.load()
+    assert cfg["last_color"] == "#e9262c"
+    assert cfg["last_size"] == "L"
+    # a new session must pick up the persisted prefs
+    img2 = QImage(64, 64, QImage.Format.Format_ARGB32)
+    sess2 = Session(img2, app_quit_on_done=False)
+    assert sess2.color_hex == "#e9262c"
+    assert sess2.size_name == "L"
