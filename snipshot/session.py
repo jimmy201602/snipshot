@@ -3,13 +3,15 @@ selection, committed annotations, and finish actions."""
 from __future__ import annotations
 
 import datetime
+import threading
 from pathlib import Path
 
 from PyQt6.QtCore import QObject, QRectF, Qt, pyqtSignal
 from PyQt6.QtGui import QColor, QGuiApplication, QImage, QPainter
 
 from . import clipboard, config
-from .shapes import (PALETTE, ShapeStack, TOOL_NONE, make_mosaic_image)
+from .shapes import (PALETTE, ShapeStack, TOOL_MOSAIC, TOOL_NONE,
+                     make_mosaic_image)
 
 
 def default_filename() -> str:
@@ -24,11 +26,13 @@ class Session(QObject):
     selectionChanged = pyqtSignal()
     annotationsChanged = pyqtSignal()
     toolChanged = pyqtSignal()
+    mosaicReady = pyqtSignal()
 
     def __init__(self, image: QImage, app_quit_on_done: bool = True):
         super().__init__()
         self.image = image
-        self.mosaic = make_mosaic_image(image)
+        self.mosaic: QImage | None = None   # computed off the UI thread
+        self._mosaic_started = False
         self.stack = ShapeStack()
         self.sel: QRectF | None = None          # in image px
         self.tool: str = TOOL_NONE
@@ -54,7 +58,37 @@ class Session(QObject):
 
     def set_tool(self, t: str) -> None:
         self.tool = t
+        if t == TOOL_MOSAIC:
+            self.start_mosaic_worker()  # background; shape appears on ready
         self.toolChanged.emit()
+
+    # ---- mosaic (lazy, computed off the UI thread) ----------------------
+    def start_mosaic_worker(self) -> None:
+        """Kick off background pixelation; emits mosaicReady when done."""
+        if self._mosaic_started:
+            return
+        self._mosaic_started = True
+        self.mosaicReady.connect(self._apply_mosaic)
+        # plain python thread: the signal emit is queued to the GUI thread
+        threading.Thread(target=self._mosaic_work, daemon=True).start()
+
+    def _apply_mosaic(self) -> None:
+        self.mosaic = getattr(self, "_mosaic_result", None) \
+            or make_mosaic_image(self.image)
+        self.annotationsChanged.emit()
+
+    def _mosaic_work(self) -> None:
+        self._mosaic_result = make_mosaic_image(self.image)
+        self.mosaicReady.emit()
+
+    def ensure_mosaic(self) -> QImage:
+        """Synchronous fallback if the worker hasn't finished yet."""
+        res = getattr(self, "_mosaic_result", None)
+        if res is None:
+            res = make_mosaic_image(self.image)
+            self._mosaic_result = res
+        self.mosaic = res
+        return res
 
     def render_crop(self) -> QImage | None:
         """Selection + annotations rendered at native image resolution."""
@@ -69,7 +103,7 @@ class Session(QObject):
         p.translate(-r.topLeft())
         p.drawImage(0, 0, self.image)
         for s in self.stack.shapes:
-            s.draw(p, self.mosaic)
+            s.draw(p, self.mosaic or self.ensure_mosaic())
         p.end()
         return out
 

@@ -7,12 +7,12 @@ maps between its widget coordinates (logical px) and image px.
 from __future__ import annotations
 
 from PyQt6.QtCore import (QEvent, QLineF, QObject, QPoint, QPointF, QRectF,
-                         Qt)
+                         QSizeF, Qt)
 from PyQt6.QtGui import (QColor, QFont, QKeyEvent, QMouseEvent, QPainter,
-                        QPainterPath, QPen, QScreen)
+                        QPainterPath, QPen, QPixmap, QScreen)
 from PyQt6.QtWidgets import QLineEdit, QWidget
 
-from .magnifier import draw_magnifier
+from .magnifier import draw_magnifier, magnifier_rect
 from .shapes import (SIZES, TEXT_SIZES, TOOL_ARROW, TOOL_ELLIPSE,
                      TOOL_MOSAIC, TOOL_NONE, TOOL_PEN, TOOL_RECT, TOOL_TEXT,
                      Shape)
@@ -50,6 +50,23 @@ class Overlay(QWidget):
         )
         self.crop_img = session.image.copy(self.img_rect.toAlignedRect())
 
+        # --- prebaked pixmaps -------------------------------------------
+        # Rendered once at the window's buffer resolution so paintEvent is
+        # a couple of straight blits instead of a full-screen scale+dim.
+        self.buf_dpr = screen.devicePixelRatio() or 1.0
+        target = self.crop_img.size() * self.buf_dpr / self.sx
+        sized = self.crop_img
+        if target != sized.size():
+            sized = sized.scaled(target, Qt.AspectRatioMode.IgnoreAspectRatio,
+                                 Qt.TransformationMode.SmoothTransformation)
+        self.bright_pm = QPixmap.fromImage(sized)
+        self.bright_pm.setDevicePixelRatio(self.buf_dpr)
+        self.dim_pm = QPixmap(self.bright_pm)
+        dp = QPainter(self.dim_pm)
+        dp.fillRect(QRectF(0, 0, self.dim_pm.width(), self.dim_pm.height()),
+                    DIM)
+        dp.end()
+
         self.state = STATE_IDLE
         self.cursor_pos = QPointF(-1, -1)
         self.press_img = QPointF()          # mouse-down point, image px
@@ -57,14 +74,18 @@ class Overlay(QWidget):
         self.handle_idx = -1
         self.cur_shape: Shape | None = None
         self.shape_anchor = QPointF()
+        self.last_shape_pt = QPointF()
         self.text_edit: QLineEdit | None = None
         self.text_anchor = QPointF()        # image px
         self._owns_sel = False              # this overlay owns the selection
+        self._last_sel = QRectF()           # last painted sel, widget px
 
         self.setWindowFlags(Qt.WindowType.FramelessWindowHint
                             | Qt.WindowType.WindowStaysOnTopHint
                             | Qt.WindowType.Window)
         self.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
+        self.setAttribute(Qt.WidgetAttribute.WA_OpaquePaintEvent)
+        self.setAttribute(Qt.WidgetAttribute.WA_NoSystemBackground)
         self.setMouseTracking(True)
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         self.setCursor(Qt.CursorShape.CrossCursor)
@@ -85,8 +106,9 @@ class Overlay(QWidget):
         self.toolbar.doneRequested.connect(session.confirm)
         self.palette.colorPicked.connect(self._on_color)
         self.palette.sizePicked.connect(self._on_size)
-        session.selectionChanged.connect(self._relayout)
+        session.selectionChanged.connect(self._on_sel_changed)
         session.annotationsChanged.connect(self._on_annots)
+        session.mosaicReady.connect(self._on_mosaic)
         session.finished.connect(self.close)
 
     # ------------------------------------------------------------------
@@ -103,6 +125,43 @@ class Overlay(QWidget):
         r = self.session.sel_rect()
         return QRectF(self.to_w(r.topLeft()), self.to_w(r.bottomRight()))
 
+    def _pmrect(self, r: QRectF) -> QRectF:
+        """Widget-space rect → pixmap source rect (buffer px)."""
+        d = self.buf_dpr
+        return QRectF(r.x() * d, r.y() * d, r.width() * d, r.height() * d)
+
+    # ------------------------------------------------------------------
+    # dirty-region helpers (partial repaints — a 4K blit per mousemove
+    # is what made the first version feel laggy)
+    def _mark(self, r: QRectF | None) -> None:
+        if r is None or r.isEmpty():
+            return
+        self.update(r.toAlignedRect().adjusted(-2, -2, 2, 2)
+                    .intersected(self.rect()))
+
+    def _sel_dirty(self, r: QRectF | None = None) -> QRectF:
+        r = self.sel_local() if r is None else r
+        # handles + size label above + arrowheads can stick past the rect
+        return r.adjusted(-20, -50, 20, 50)
+
+    def _cursor_rects(self, pt: QPointF) -> list:
+        out: list = []
+        if pt.x() < 0:
+            return out
+        # mark the crosshair strips whenever they are (or just were)
+        # drawable — otherwise the last lines would stay painted
+        if self.state in (STATE_IDLE, STATE_DRAG):
+            out.append(QRectF(pt.x() - 1.5, 0, 3, self.height()))
+            out.append(QRectF(0, pt.y() - 1.5, self.width(), 3))
+        if self._magnifier_visible(pt):
+            out.append(magnifier_rect(pt, self.width(), self.height()))
+        return out
+
+    def _magnifier_visible(self, pt: QPointF) -> bool:
+        return (self.state in (STATE_IDLE, STATE_DRAG)
+                and not (self.session.has_selection()
+                         and self._inside_sel(pt)))
+
     # ------------------------------------------------------------------
     # session callbacks
     def _on_tool(self, tool: str) -> None:
@@ -111,15 +170,24 @@ class Overlay(QWidget):
 
     def _on_color(self, c: QColor) -> None:
         self.session.color_hex = c.name()
-        self.update()
 
     def _on_size(self, name: str) -> None:
         self.session.size_name = name
-        self.update()
 
     def _on_annots(self) -> None:
         self.toolbar.set_undo_enabled(bool(self.session.stack.shapes))
-        self.update()
+        self._mark(self._sel_dirty())
+
+    def _on_mosaic(self) -> None:
+        # background pixelation finished → repaint selection area
+        self._mark(self._sel_dirty())
+
+    def _on_sel_changed(self) -> None:
+        newr = self.sel_local() if self.session.sel is not None else QRectF()
+        self._mark(self._sel_dirty(self._last_sel))
+        self._mark(self._sel_dirty(newr))
+        self._last_sel = QRectF(newr)
+        self._relayout()
 
     def _relayout(self) -> None:
         has = (self.session.has_selection() and self._owns_sel
@@ -128,7 +196,6 @@ class Overlay(QWidget):
         self.palette.setVisible(has and self.session.tool != TOOL_NONE)
         if has:
             self._place_bars()
-        self.update()
 
     def _place_bars(self) -> None:
         r = self.sel_local()
@@ -214,11 +281,14 @@ class Overlay(QWidget):
             if o is not self:
                 o._owns_sel = False
         self.session.set_selection(QRectF(img_pt, img_pt))
-        self.update()
 
     def mouseMoveEvent(self, e: QMouseEvent) -> None:
         pt = e.position()
+        for r in self._cursor_rects(self.cursor_pos):
+            self._mark(r)
         self.cursor_pos = pt
+        for r in self._cursor_rects(pt):
+            self._mark(r)
         img_pt = self.to_img(pt)
 
         if self.state == STATE_DRAG:
@@ -232,7 +302,6 @@ class Overlay(QWidget):
             self._extend_shape(img_pt)
         else:
             self._update_cursor(pt)
-        self.update()
 
     def mouseReleaseEvent(self, e: QMouseEvent) -> None:
         if e.button() != Qt.MouseButton.LeftButton:
@@ -247,6 +316,7 @@ class Overlay(QWidget):
             self._commit_shape()
             self.state = STATE_IDLE
         self._update_cursor(e.position())
+        self._mark(self._sel_dirty())
         self._relayout()
 
     def mouseDoubleClickEvent(self, e: QMouseEvent) -> None:
@@ -338,18 +408,35 @@ class Overlay(QWidget):
                                    SIZES.get(s.size_name, 4.0) *
                                    (6.0 if s.tool == TOOL_MOSAIC else 1.0),
                                    path=path)
+        self.last_shape_pt = img_pt
 
     def _extend_shape(self, img_pt: QPointF) -> None:
         c = self.cur_shape
         if c is None:
             return
+        pad = c.width * 2 + 40          # stroke + arrowhead, image px
         if c.tool in (TOOL_RECT, TOOL_ELLIPSE):
-            c.rect = QRectF(self.shape_anchor, img_pt).normalized()
+            new = QRectF(self.shape_anchor, img_pt).normalized()
+            old = c.rect or new
+            c.rect = new
+            area = old.united(new).adjusted(-pad, -pad, pad, pad)
         elif c.tool == TOOL_ARROW:
+            old2 = c.p2 or img_pt
             c.p2 = img_pt
+            area = QRectF(c.p1, c.p2).normalized().adjusted(-pad, -pad,
+                                                           pad, pad)
+            area = area.united(QRectF(c.p1, old2).normalized()
+                               .adjusted(-pad, -pad, pad, pad))
         elif c.tool in (TOOL_PEN, TOOL_MOSAIC) and c.path is not None:
             c.path.lineTo(img_pt)
-        self.update()
+            area = QRectF(self.last_shape_pt, img_pt).normalized() \
+                .adjusted(-pad, -pad, pad, pad)
+        else:
+            return
+        self.last_shape_pt = img_pt
+        # image-px rect → widget rect
+        self._mark(QRectF(self.to_w(area.topLeft()),
+                          self.to_w(area.bottomRight())))
 
     def _commit_shape(self) -> None:
         c = self.cur_shape
@@ -416,7 +503,7 @@ class Overlay(QWidget):
                           font_px=TEXT_SIZES.get(self.session.size_name, 24))
             self.session.stack.push(shape)
             self.session.annotationsChanged.emit()
-        self.update()
+        self._mark(self._sel_dirty())
 
     # ------------------------------------------------------------------
     # painting
@@ -424,23 +511,25 @@ class Overlay(QWidget):
         p = QPainter(self)
         w, h = self.width(), self.height()
 
-        # 1. the frozen screenshot
-        p.drawImage(QRectF(0, 0, w, h), self.crop_img)
+        # 1+2. prebaked dimmed screenshot (opaque blit, clipped by Qt to
+        # the event's update region automatically)
+        p.drawPixmap(0, 0, self.dim_pm)
 
-        # 2. dim everything except the selection
-        dim = QPainterPath()
-        dim.addRect(QRectF(0, 0, w, h))
+        # restore the bright area inside the selection
         if self.session.has_selection():
-            dim.addRect(self.sel_local())
-        dim.setFillRule(Qt.FillRule.OddEvenFill)
-        p.fillPath(dim, DIM)
+            r = self.sel_local()
+            p.drawPixmap(r, self.bright_pm, self._pmrect(r))
 
-        # 3. annotations in image-px space
+        # 3. annotations in image-px space (skip those outside the
+        # event's dirty rect — cheap cull when there are many)
+        dirty_img = QRectF(self.to_img(_e.rect().topLeft()),
+                           self.to_img(_e.rect().bottomRight()))
         p.save()
         p.translate(-self.img_rect.topLeft())
         p.scale(1.0 / self.sx, 1.0 / self.sy)
         for s in self.session.stack.shapes:
-            s.draw(p, self.session.mosaic)
+            if self._shape_bounds(s).intersects(dirty_img):
+                s.draw(p, self.session.mosaic)
         if self.cur_shape is not None:
             self.cur_shape.draw(p, self.session.mosaic)
         p.restore()
@@ -463,9 +552,7 @@ class Overlay(QWidget):
             self._draw_crosshair(p)
 
         # 5. magnifier while picking / creating the selection
-        if self.state in (STATE_IDLE, STATE_DRAG) and not (
-                self.session.has_selection()
-                and self._inside_sel(self.cursor_pos)):
+        if self._magnifier_visible(self.cursor_pos):
             draw_magnifier(p, self.cursor_pos, w, h, self.session.image,
                            self.img_rect.topLeft(), self.sx)
 
@@ -488,6 +575,21 @@ class Overlay(QWidget):
         p.drawRoundedRect(QRectF(x, y, w, hh), 4, 4)
         p.setPen(QColor("#ffffff"))
         p.drawText(QRectF(x, y, w, hh), Qt.AlignmentFlag.AlignCenter, text)
+
+    @staticmethod
+    def _shape_bounds(s: Shape) -> QRectF:
+        if s.rect is not None:
+            r = QRectF(s.rect)
+        elif s.path is not None:
+            r = s.path.boundingRect()
+        elif s.p1 is not None and s.p2 is not None:
+            r = QRectF(s.p1, s.p2).normalized()
+        elif s.pos is not None:
+            r = QRectF(s.pos, QSizeF(800, s.font_px * 2.5))
+        else:
+            return QRectF()
+        pad = max(24.0, s.width * 3.5)
+        return r.adjusted(-pad, -pad, pad, pad)
 
     def _draw_crosshair(self, p: QPainter) -> None:
         if self.cursor_pos.x() < 0:

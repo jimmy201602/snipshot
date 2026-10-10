@@ -41,6 +41,8 @@ def show_overlays(image: QImage, quit_on_done: bool = True) -> Session:
         ov.show_on_screen()
     if session.overlays:
         session.overlays[0].setFocus()
+    # pixelation off the UI thread so it doesn't delay the overlay
+    session.start_mosaic_worker()
     return session
 
 

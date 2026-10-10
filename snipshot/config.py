@@ -16,7 +16,7 @@ DEFAULTS = {
     # "oneshot": every hotkey press runs capture+overlay in a fresh process
     "mode": "daemon",
     # milliseconds between trigger and capture (lets transient UI settle)
-    "capture_delay_ms": 120,
+    "capture_delay_ms": 40,
 }
 
 

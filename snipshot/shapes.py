@@ -92,7 +92,9 @@ def _draw_mosaic(p: QPainter, shape: Shape, mosaic_img: QImage) -> None:
     else:
         return
     p.setClipPath(clip)
-    p.drawImage(0, 0, mosaic_img)
+    # only rasterize the stroke's bounds, not the whole 4K mosaic image
+    b = clip.boundingRect()
+    p.drawImage(b, mosaic_img, b)
 
 
 def _draw_text(p: QPainter, shape: Shape) -> None:

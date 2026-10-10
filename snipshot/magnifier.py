@@ -6,6 +6,19 @@ CELL = 10          # logical px per source pixel
 NCELLS = 11        # source pixels across
 PAD = 14           # distance from cursor
 INFO_H = 40        # info strip height
+BOX_W = NCELLS * CELL
+BOX_H = NCELLS * CELL + INFO_H
+
+
+def magnifier_rect(cursor: QPointF, widget_w: int, widget_h: int) -> QRectF:
+    """Widget-space rect occupied by the magnifier (for dirty tracking)."""
+    x = cursor.x() + PAD
+    y = cursor.y() + PAD
+    if x + BOX_W > widget_w - 2:
+        x = cursor.x() - PAD - BOX_W
+    if y + BOX_H > widget_h - 2:
+        y = cursor.y() - PAD - BOX_H
+    return QRectF(max(2.0, x), max(2.0, y), BOX_W, BOX_H)
 
 
 def draw_magnifier(p: QPainter, cursor: QPointF, widget_w: int, widget_h: int,
@@ -13,19 +26,8 @@ def draw_magnifier(p: QPainter, cursor: QPointF, widget_w: int, widget_h: int,
     """cursor: widget coords. img_origin: image-px coord of widget (0,0).
     scale: image px per logical px."""
     img_pt = img_origin + cursor * scale
-
-    box_w = NCELLS * CELL
-    box_h = NCELLS * CELL + INFO_H
-
-    # place at bottom-right of cursor, flipping near edges
-    x = cursor.x() + PAD
-    y = cursor.y() + PAD
-    if x + box_w > widget_w - 2:
-        x = cursor.x() - PAD - box_w
-    if y + box_h > widget_h - 2:
-        y = cursor.y() - PAD - box_h
-    x = max(2.0, x)
-    y = max(2.0, y)
+    r = magnifier_rect(cursor, widget_w, widget_h)
+    x, y, box_w, box_h = r.x(), r.y(), r.width(), r.height()
 
     p.save()
     p.setRenderHint(QPainter.RenderHint.Antialiasing, False)
