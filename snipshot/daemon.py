@@ -1,10 +1,32 @@
 """Resident app: tray icon + local socket listener for TRIGGER."""
+import fcntl
+from pathlib import Path
+
 from PyQt6.QtCore import QObject
 from PyQt6.QtNetwork import QLocalServer, QLocalSocket
 from PyQt6.QtWidgets import QApplication
 
 from . import ipc
 from .app import run_shot
+
+
+def _acquire_instance_lock() -> object | None:
+    """flock-guarded single instance — survives socket-race windows.
+
+    The STATUS probe alone has a race: a daemon mid-capture (GUI thread
+    blocked by the gnome-screenshot subprocess) can't answer in time, so a
+    second starter proceeds and steals the socket via removeServer — two
+    daemons then fight forever. An exclusive flock on a stable path is
+    atomic and immune to that.
+    """
+    path = Path(ipc.socket_path()).with_suffix(".lock")
+    try:
+        fh = path.open("w")
+        fcntl.flock(fh, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError:
+        fh.close()
+        return None
+    return fh
 
 
 class Daemon(QObject):
@@ -67,10 +89,11 @@ def run_daemon() -> int:
     app = QApplication([])
     app.setApplicationName("snipshot")
     app.setQuitOnLastWindowClosed(False)
-    # a live daemon may be momentarily unreachable while its GUI thread is
-    # blocked (e.g. mid-capture) — probe with a generous timeout BEFORE
-    # touching the socket, or we'd steal it from a running instance
-    if ipc.query("STATUS", timeout=3.0) is not None:
+    # flock first: atomic and race-free. A busy daemon can miss the STATUS
+    # probe (its GUI thread is inside the capture subprocess), but it can
+    # never release the lock without exiting.
+    lock = _acquire_instance_lock()
+    if lock is None:
         print("snipshot daemon 已在运行")
         return 0
     daemon = Daemon(app)

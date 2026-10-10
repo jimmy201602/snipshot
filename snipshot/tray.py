@@ -15,21 +15,24 @@ from .trayicon import tray_icon
 class TrayApp(QObject):
     def __init__(self, app: QApplication, daemon):
         super().__init__()
+        self.app = app
         self.daemon = daemon
         self.tray: QSystemTrayIcon | None = None
         self._dlg: SettingsDialog | None = None
+        self._init_tray()
 
+    def _init_tray(self) -> None:
         if not QSystemTrayIcon.isSystemTrayAvailable():
             print("系统托盘不可用（GNOME 需要 AppIndicator 扩展）;"
                   "仍可通过快捷键和 `snipshot settings` 使用。")
             return
 
-        self.tray = QSystemTrayIcon(tray_icon(), app)
+        self.tray = QSystemTrayIcon(tray_icon(), self.app)
         self.tray.setToolTip("Snipshot 截图")
 
         menu = QMenu()
         act_shot = menu.addAction("截图")
-        act_shot.triggered.connect(daemon.trigger)
+        act_shot.triggered.connect(self.daemon.trigger)
         menu.addSeparator()
 
         act_set = menu.addAction("设置…")
@@ -42,7 +45,7 @@ class TrayApp(QObject):
 
         menu.addSeparator()
         act_quit = menu.addAction("退出")
-        act_quit.triggered.connect(app.quit)
+        act_quit.triggered.connect(self.app.quit)
 
         self.tray.setContextMenu(menu)
         self.tray.activated.connect(self._activated)
@@ -53,6 +56,9 @@ class TrayApp(QObject):
             self.open_settings()
 
     def open_settings(self) -> None:
+        # the watcher may not have been up at daemon start — retry lazily
+        if self.tray is None:
+            self._init_tray()
         if self._dlg is not None and self._dlg.isVisible():
             self._dlg.raise_()
             self._dlg.activateWindow()
@@ -64,7 +70,8 @@ class TrayApp(QObject):
         self._dlg.setWindowFlag(Qt.WindowType.WindowStaysOnTopHint)
         self._dlg.exec()
         self._dlg = None
-        self.act_auto.setChecked(bool(config.load().get("autostart")))
+        if self.tray is not None:
+            self.act_auto.setChecked(bool(config.load().get("autostart")))
 
     def _toggle_autostart(self, on: bool) -> None:
         cfg = config.load()
