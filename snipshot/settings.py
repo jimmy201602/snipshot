@@ -69,6 +69,11 @@ class SettingsDialog(QDialog):
         self.delay_spin.setValue(int(self.cfg.get("capture_delay_ms", 40)))
         form.addRow("触发延迟", self.delay_spin)
 
+        self.windetect_chk = QCheckBox(
+            "窗口边缘吸附（悬停自动选中窗口，需系统辅助功能接口）")
+        self.windetect_chk.setChecked(bool(self.cfg.get("window_detect", True)))
+        form.addRow("", self.windetect_chk)
+
         self.oneshot_chk = QCheckBox("软件未运行时，快捷键也可直接截图（单次模式）")
         self.oneshot_chk.setChecked(bool(self.cfg.get("oneshot_fallback")))
         form.addRow("", self.oneshot_chk)
@@ -107,8 +112,14 @@ class SettingsDialog(QDialog):
         cfg["save_dir"] = self.dir_edit.text().strip() or cfg["save_dir"]
         cfg["capture_delay_ms"] = self.delay_spin.value()
         cfg["oneshot_fallback"] = self.oneshot_chk.isChecked()
+        cfg["window_detect"] = self.windetect_chk.isChecked()
         cfg["autostart"] = self.autostart_chk.isChecked()
         config.save(cfg)
+
+        if cfg["window_detect"]:
+            # AT-SPI window enumeration needs the desktop a11y tree on
+            from .winlist import enable_toolkit_accessibility
+            enable_toolkit_accessibility()
 
         install.install_hotkey()
         if cfg["autostart"]:

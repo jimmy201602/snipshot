@@ -39,6 +39,7 @@ class Overlay(QWidget):
         self.screen = screen
         self.sx = scale_x
         self.sy = scale_y
+        self.virt_tl = virt_tl
         geo = screen.geometry()
         self.geo = geo
         # this screen's sub-rect inside the full screenshot (image px)
@@ -79,6 +80,10 @@ class Overlay(QWidget):
         self.text_anchor = QPointF()        # image px
         self._owns_sel = False              # this overlay owns the selection
         self._last_sel = QRectF()           # last painted sel, widget px
+        # hover-snap window detection (image px)
+        self.win_img: list[tuple[str, QRectF]] = []
+        self.hover_img: QRectF | None = None
+        self.press_hover: QRectF | None = None
 
         self.setWindowFlags(Qt.WindowType.FramelessWindowHint
                             | Qt.WindowType.WindowStaysOnTopHint
@@ -110,6 +115,7 @@ class Overlay(QWidget):
         session.selectionChanged.connect(self._on_sel_changed)
         session.annotationsChanged.connect(self._on_annots)
         session.mosaicReady.connect(self._on_mosaic)
+        session.windowsChanged.connect(self._on_windows)
         session.finished.connect(self.close)
 
     # ------------------------------------------------------------------
@@ -182,6 +188,46 @@ class Overlay(QWidget):
     def _on_mosaic(self) -> None:
         # background pixelation finished → repaint selection area
         self._mark(self._sel_dirty())
+
+    # ------------------------------------------------------------------
+    # hover-snap window detection (WeChat-style)
+    def _on_windows(self) -> None:
+        vx, vy = self.virt_tl.x(), self.virt_tl.y()
+        self.win_img = [
+            (name, QRectF((r.x() - vx) * self.sx,
+                          (r.y() - vy) * self.sy,
+                          r.width() * self.sx, r.height() * self.sy))
+            for name, r in self.session.windows
+        ]
+        self._update_hover(self.to_img(self.cursor_pos))
+
+    def _window_at(self, img_pt: QPointF) -> QRectF | None:
+        """Smallest detected window containing the point (tightest match)."""
+        best = None
+        for _name, r in self.win_img:
+            if r.contains(img_pt) and (
+                    best is None or r.width() * r.height()
+                    < best.width() * best.height()):
+                best = r
+        return best
+
+    def _update_hover(self, img_pt: QPointF) -> None:
+        new = None
+        if self.state == STATE_IDLE:
+            in_sel = self.session.has_selection() and \
+                self.session.sel_rect().contains(img_pt)
+            if not in_sel:
+                new = self._window_at(img_pt)
+        if (new is None) != (self.hover_img is None) or (
+                new is not None and new != self.hover_img):
+            for r in (self.hover_img, new):
+                if r is not None:
+                    self._mark(self._hover_widget_rect(r))
+            self.hover_img = new
+
+    def _hover_widget_rect(self, r_img: QRectF) -> QRectF:
+        return QRectF(self.to_w(r_img.topLeft()),
+                      self.to_w(r_img.bottomRight())).adjusted(-4, -4, 4, 4)
 
     def _on_sel_changed(self) -> None:
         newr = self.sel_local() if self.session.sel is not None else QRectF()
@@ -274,9 +320,11 @@ class Overlay(QWidget):
                 self.press_sel = self.session.sel_rect()
                 return
 
-        # otherwise start a new selection
+        # otherwise start a new selection — remember the detected window
+        # under the cursor so a plain click (no drag) can snap to it
         self.state = STATE_DRAG
         self.press_img = img_pt
+        self.press_hover = self.hover_img
         self._owns_sel = True
         for o in self.session.overlays:
             if o is not self:
@@ -291,6 +339,7 @@ class Overlay(QWidget):
         for r in self._cursor_rects(pt):
             self._mark(r)
         img_pt = self.to_img(pt)
+        self._update_hover(img_pt)
 
         if self.state == STATE_DRAG:
             self.session.set_selection(QRectF(self.press_img, img_pt))
@@ -309,7 +358,16 @@ class Overlay(QWidget):
             return
         if self.state == STATE_DRAG:
             if not self.session.has_selection():
-                self.session.set_selection(None)   # click without drag
+                img_pt = self.to_img(e.position())
+                if (self.press_hover is not None
+                        and self.press_hover.contains(img_pt)):
+                    # plain click on a detected window → snap to it
+                    self._owns_sel = True
+                    self.session.set_selection(self.press_hover.intersected(
+                        QRectF(self.session.image.rect())))
+                else:
+                    self.session.set_selection(None)   # click without drag
+                self.press_hover = None
             self.state = STATE_IDLE
         elif self.state in (STATE_MOVE, STATE_RESIZE):
             self.state = STATE_IDLE
@@ -520,6 +578,16 @@ class Overlay(QWidget):
         if self.session.has_selection():
             r = self.sel_local()
             p.drawPixmap(r, self.bright_pm, self._pmrect(r))
+
+        # 2b. hovered window preview (WeChat-style snap target)
+        if self.hover_img is not None and self.state == STATE_IDLE:
+            hr = QRectF(self.to_w(self.hover_img.topLeft()),
+                        self.to_w(self.hover_img.bottomRight()))
+            if hr.intersects(QRectF(0, 0, w, h)):
+                p.drawPixmap(hr, self.bright_pm, self._pmrect(hr))
+                p.setPen(QPen(ACCENT, 2))
+                p.setBrush(Qt.BrushStyle.NoBrush)
+                p.drawRect(hr)
 
         # 3. annotations in image-px space (skip those outside the
         # event's dirty rect — cheap cull when there are many)

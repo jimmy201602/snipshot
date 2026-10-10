@@ -180,6 +180,76 @@ def test_magnifier_and_dims_do_not_crash(qapp):
     ov.grab()
 
 
+# ------------------------------------------------- window snap (AT-SPI) --
+def _inject_windows(sess, ov, rects):
+    """Feed fake desktop-logical window rects as if the worker found them."""
+    sess.windows = [("app", r) for r in rects]
+    ov._on_windows()
+
+
+def test_window_hover_and_snap(qapp):
+    sess, ov = _make()
+    win = QRectF(200, 150, 500, 350)
+    _inject_windows(sess, ov, [win])
+    QTest.mouseMove(ov, QPoint(300, 250))
+    assert ov.hover_img is not None
+    assert ov.hover_img == win
+    # a plain click (no drag) snaps the selection to the window
+    QTest.mouseClick(ov, Qt.MouseButton.LeftButton, pos=QPoint(300, 250))
+    assert sess.has_selection()
+    r = sess.sel_rect()
+    assert r == win
+
+
+def test_window_snap_prefers_smallest(qapp):
+    sess, ov = _make()
+    big = QRectF(50, 50, 800, 600)
+    small = QRectF(200, 200, 300, 200)
+    _inject_windows(sess, ov, [big, small])
+    QTest.mouseMove(ov, QPoint(300, 280))
+    assert ov.hover_img == small          # tightest containing window wins
+
+
+def test_window_hover_outside_is_none(qapp):
+    sess, ov = _make()
+    _inject_windows(sess, ov, [QRectF(200, 150, 300, 200)])
+    QTest.mouseMove(ov, QPoint(30, 30))   # outside every window
+    assert ov.hover_img is None
+
+
+def test_window_snap_replaces_selection(qapp):
+    sess, ov = _make()
+    win = QRectF(400, 300, 400, 300)
+    _inject_windows(sess, ov, [win])
+    _drag(ov, QPoint(50, 50), QPoint(200, 200))
+    assert sess.has_selection()
+    QTest.mouseMove(ov, QPoint(500, 400)) # hover outside current sel
+    assert ov.hover_img == win
+    QTest.mouseClick(ov, Qt.MouseButton.LeftButton, pos=QPoint(500, 400))
+    r = sess.sel_rect()
+    assert r == win
+
+
+def test_drag_still_free_selects_over_window(qapp):
+    """Dragging (not clicking) inside a detected window must free-select."""
+    sess, ov = _make()
+    _inject_windows(sess, ov, [QRectF(0, 0, 900, 700)])
+    _drag(ov, QPoint(100, 100), QPoint(350, 300))
+    r = sess.sel_rect()
+    assert r.width() == pytest.approx(250, abs=3)
+    assert r.x() == pytest.approx(100, abs=3)
+
+
+def test_no_windows_falls_back_to_free_select(qapp):
+    """Empty window list (pyatspi missing) → click still clears as before."""
+    sess, ov = _make()
+    _inject_windows(sess, ov, [])
+    QTest.mouseMove(ov, QPoint(300, 300))
+    assert ov.hover_img is None
+    QTest.mouseClick(ov, Qt.MouseButton.LeftButton, pos=QPoint(300, 300))
+    assert not sess.has_selection()
+
+
 # ------------------------------------------------------------ keys ------
 def test_esc_cancels(qapp):
     sess, ov = _make()

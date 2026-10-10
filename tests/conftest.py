@@ -17,3 +17,18 @@ from PyQt6.QtWidgets import QApplication
 def qapp():
     app = QApplication.instance() or QApplication([])
     yield app
+
+
+@pytest.fixture(autouse=True)
+def _clean_toplevel(qapp):
+    """Destroy leftover top-level widgets between tests.
+
+    QTest.mouseMove delivers to whichever *window* covers the point —
+    a stale overlay from a previous test would silently swallow moves.
+    """
+    yield
+    for w in QApplication.topLevelWidgets():
+        if w.isWindow():
+            w.close()
+    qapp.sendPostedEvents()
+    qapp.processEvents()

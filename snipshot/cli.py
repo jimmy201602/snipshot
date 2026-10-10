@@ -7,6 +7,7 @@
   snipshot shoot      capture + overlay in this process (oneshot)
   snipshot settings   open the settings dialog
   snipshot daemon     resident tray app; listens for TRIGGER on local socket
+  snipshot wincheck   list windows visible to the AT-SPI hover-snap detector
   snipshot install    register hotkey (and autostart if enabled)
   snipshot uninstall  remove hotkey + autostart + menu entry
 """
@@ -53,6 +54,18 @@ def main(argv: list[str] | None = None) -> int:
     if cmd == "uninstall":
         from .install import uninstall
         print(uninstall())
+        return 0
+
+    if cmd == "wincheck":
+        from .winlist import (enum_windows_logical,
+                              toolkit_accessibility_enabled)
+        print("toolkit-accessibility:",
+              toolkit_accessibility_enabled())
+        wins = enum_windows_logical()
+        for name, r in wins:
+            print(f"{name:24} {r.x():7.0f},{r.y():6.0f} "
+                  f"{r.width():6.0f}x{r.height():5.0f}")
+        print(f"{len(wins)} windows detected")
         return 0
 
     if cmd == "settings":

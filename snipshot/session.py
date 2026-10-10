@@ -27,12 +27,17 @@ class Session(QObject):
     annotationsChanged = pyqtSignal()
     toolChanged = pyqtSignal()
     mosaicReady = pyqtSignal()
+    windowsReady = pyqtSignal()    # worker finished (internal)
+    windowsChanged = pyqtSignal()  # self.windows populated → overlays map
 
     def __init__(self, image: QImage, app_quit_on_done: bool = True):
         super().__init__()
         self.image = image
         self.mosaic: QImage | None = None   # computed off the UI thread
         self._mosaic_started = False
+        # window rects for hover-snap: [(app_name, rect desktop-logical px)]
+        self.windows: list[tuple[str, QRectF]] = []
+        self._windows_started = False
         self.stack = ShapeStack()
         self.sel: QRectF | None = None          # in image px
         self.tool: str = TOOL_NONE
@@ -91,6 +96,25 @@ class Session(QObject):
         self.mosaic = getattr(self, "_mosaic_result", None) \
             or make_mosaic_image(self.image)
         self.annotationsChanged.emit()
+
+    # ---- window list (for hover-snap) -----------------------------------
+    def start_windows_worker(self) -> None:
+        if self._windows_started:
+            return
+        self._windows_started = True
+        if not config.load().get("window_detect", True):
+            return
+        self.windowsReady.connect(self._apply_windows)
+        threading.Thread(target=self._windows_work, daemon=True).start()
+
+    def _windows_work(self) -> None:
+        from .winlist import enum_windows_logical
+        self._windows_result = enum_windows_logical()
+        self.windowsReady.emit()
+
+    def _apply_windows(self) -> None:
+        self.windows = getattr(self, "_windows_result", [])
+        self.windowsChanged.emit()
 
     def _mosaic_work(self) -> None:
         self._mosaic_result = make_mosaic_image(self.image)

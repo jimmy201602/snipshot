@@ -33,6 +33,8 @@ snipshot install       # 注册快捷键（daemon 模式下同时注册开机自
 （Wayland: `gnome-screenshot`/`grim`/`spectacle`，X11: `maim`/`import`/`scrot`）。
 剪贴板持久化优先用 `wl-copy` / `xclip`（都没有时会常驻进程代管剪贴板，
 直到下次复制后自动退出）。
+窗口吸附（可选）：`python3-pyatspi` + GNOME `toolkit-accessibility`
+（设置里勾选"窗口边缘吸附"会自动开启）。
 
 ## 用法
 
@@ -41,6 +43,7 @@ snipshot install       # 注册快捷键（daemon 模式下同时注册开机自
 | `snipshot` | **打开应用**（托盘常驻）；已在运行时=再截一张 |
 | `snipshot trigger` | 快捷键绑定项：仅应用运行时触发（可在设置里改兜底） |
 | `snipshot settings` | 打开设置窗口 |
+| `snipshot wincheck` | 列出窗口吸附检测到的应用窗口（排障用） |
 | `snipshot shoot` | 强制单次截图（调试/无守护时） |
 | `snipshot daemon` | 常驻托盘应用，监听 socket 触发 |
 | `snipshot install` | 注册快捷键 + 菜单项 |
@@ -57,7 +60,17 @@ snipshot install       # 注册快捷键（daemon 模式下同时注册开机自
 ### 设置项（托盘 → 设置）
 
 快捷键预设（Ctrl+Alt+A / Alt+A / 自定义）、保存目录、触发延迟、
-未运行兜底、开机自启——保存后即时生效（快捷键当场重绑）。
+窗口边缘吸附、未运行兜底、开机自启——保存后即时生效（快捷键当场重绑）。
+
+### 窗口边缘吸附（仿微信/QQ）
+
+- 触发截图后，光标悬停在某个应用窗口上 → 该窗口区域自动高亮
+- **单击**即选中整个窗口（等同拖出一个精确选框）
+- 直接拖拽仍是自由框选，两种手势互不干扰
+- 实现走 AT-SPI 无障碍树（Wayland 没有公开的窗口枚举 API），
+  需要 `python3-pyatspi` 与 `org.gnome.desktop.interface
+  toolkit-accessibility=true`；检测不可用时静默退化为纯框选
+- `snipshot wincheck` 可查看当前能被吸附的窗口列表
 
 ## 操作
 

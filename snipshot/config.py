@@ -20,6 +20,9 @@ DEFAULTS = {
     # remembered across sessions (WeChat/QQ do this too)
     "last_color": "#00a2ff",
     "last_size": "M",
+    # hover-to-snap window selection via AT-SPI (needs pyatspi +
+    # GNOME toolkit-accessibility)
+    "window_detect": True,
 }
 
 
